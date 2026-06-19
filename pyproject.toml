@@ -1,0 +1,30 @@
+[project]
+name = "face-cluster"
+version = "0.1.0"
+description = "Run a fast clustering algorithm on face embeddings to group similar faces together."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "gradio>=6.19.0",
+    "insightface>=1.0.1",
+    "numpy>=2.4.6",
+    "nvidia-cublas>=13.5.1.27",
+    "nvidia-cuda-nvrtc>=13.3.33",
+    "nvidia-cuda-runtime>=13.3.29",
+    "nvidia-cudnn-cu13>=9.23.2.1",
+    "nvidia-cufft>=12.3.0.29",
+    "nvidia-curand>=10.4.3.29",
+    "nvidia-nvjitlink>=13.3.33",
+    "onnx>=1.22.0",
+    "onnxruntime-gpu==1.27.0",
+    "opencv-python>=4.13.0.92",
+    "pillow>=12.2.0",
+    "psutil>=7.2.2",
+    "py-cpuinfo>=9.0.0",
+    "py3nvml>=0.2.7",
+    "scikit-learn>=1.9.0",
+    "tqdm>=4.68.3",
+]
+
+[tool.uv]
+exclude-dependencies = ["onnxruntime"]

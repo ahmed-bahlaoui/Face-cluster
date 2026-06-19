@@ -1,0 +1,20 @@
+# Virtual environments
+.venv/
+Lib/
+Scripts/
+pyvenv.cfg
+.lock
+CACHEDIR.TAG
+
+# Python caches
+__pycache__/
+*.pyc
+
+# App input/output
+output/
+photos/
+cuda_test.onnx
+
+# IDE
+.idea/
+.vscode/
