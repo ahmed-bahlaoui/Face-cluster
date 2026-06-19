@@ -1,19 +1,25 @@
 # Face Cluster
 ![alt text](screenshot.png)
-Face Cluster is a local Gradio app that groups photos by detected person. It uses InsightFace Buffalo-L to detect faces and create face embeddings, runs ONNX Runtime with CUDA GPU inference, and clusters similar faces with DBSCAN.
+Face Cluster is a local Gradio app that groups photos by detected person. It uses InsightFace Buffalo-L to detect faces and create face embeddings, runs ONNX Runtime inference on CUDA GPU or CPU, and clusters similar faces with DBSCAN.
 
-The app is intended for Windows users with NVIDIA GPUs.
+The app is intended for Windows users. NVIDIA GPUs are recommended for faster CUDA inference, but CPU inference is also available from the UI.
 
 ## What it does
 
 - Select a folder of images or drag and drop images directly in the Gradio UI.
 - Detect every face found in the selected images.
 - Generate normalized face embeddings with InsightFace Buffalo-L.
-- Run inference through ONNX Runtime's `CUDAExecutionProvider`.
+- Run inference through ONNX Runtime's `CUDAExecutionProvider` or `CPUExecutionProvider`.
 - Cluster similar faces with DBSCAN.
 - Copy the original full photos into person folders under `output/`.
 
-## GPU inference
+## Inference modes
+
+The Gradio UI includes an **Inference** selector:
+
+- `Auto`: uses CUDA when `CUDAExecutionProvider` is available, otherwise CPU.
+- `CUDA GPU`: requires `CUDAExecutionProvider` and fails clearly if CUDA is unavailable.
+- `CPU`: uses `CPUExecutionProvider`.
 
 This project is configured for CUDA GPU inference with:
 
@@ -41,8 +47,7 @@ This is important because `insightface` depends on plain `onnxruntime`, which ca
 ## Requirements
 
 - Windows
-- NVIDIA GPU
-- Compatible NVIDIA driver
+- NVIDIA GPU and compatible driver for CUDA mode
 - Python `>=3.14`
 - [`uv`](https://docs.astral.sh/uv/) for dependency management
 
@@ -63,13 +68,13 @@ Install dependencies:
 uv sync
 ```
 
-Check that ONNX Runtime can see CUDA:
+Check that ONNX Runtime can see its available providers:
 
 ```powershell
 uv run python -c "import onnxruntime as ort; print(ort.get_available_providers())"
 ```
 
-Expected output should include:
+For CUDA mode, expected output should include:
 
 ```text
 CUDAExecutionProvider
@@ -104,6 +109,8 @@ The DBSCAN `eps` slider controls clustering strictness:
 
 - Lower values are stricter and create more separate groups.
 - Higher values are more lenient and may merge similar-looking people.
+
+The **Inference** selector controls whether the run uses Auto, CUDA GPU, or CPU mode.
 
 ## Output behavior
 
@@ -150,7 +157,7 @@ If it only shows CPU providers, make sure:
 
 ### `insightface` or ONNX Runtime falls back to CPU
 
-The app checks each InsightFace model session after startup. If CUDA is not active, it raises an error instead of silently running on CPU.
+When `CUDA GPU` mode is selected, the app checks each InsightFace model session. If CUDA is not active, it raises an error instead of silently running on CPU. Use `Auto` or `CPU` if you want CPU fallback.
 
 ### No faces found
 
@@ -174,7 +181,7 @@ output/          Generated clustering results, ignored by git
 
 ## Notes / current limitations
 
-- CPU-only mode is not the normal documented path yet. `USE_GPU = True` currently fails loudly when CUDA is unavailable.
+- CPU mode is supported, but it is slower than CUDA GPU mode.
 - The app organizes full original photos, not cropped face thumbnails.
 - Person folder names are automatic cluster IDs, not real names.
 - DBSCAN clustering quality depends on image quality, number of examples per person, and the selected `eps` value.

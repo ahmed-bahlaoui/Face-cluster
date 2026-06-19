@@ -13,34 +13,45 @@ from pathlib import Path
 # ── Config ────────────────────────────────────────────────────────────────────
 PHOTOS_DIR = Path("photos")
 OUTPUT_DIR = Path("output")
-USE_GPU    = True   # set False if CUDA not available
 
 # DBSCAN: auto-discovers k  |  cosine eps ~0.5 = strict, ~0.7 = lenient
 CLUSTER_MODE = "dbscan"   # "dbscan" | "kmeans"
 DBSCAN_EPS   = 0.6
 KMEANS_K     = 5          # only used if CLUSTER_MODE = "kmeans"
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+INFERENCE_AUTO = "Auto"
+INFERENCE_CUDA = "CUDA GPU"
+INFERENCE_CPU = "CPU"
+INFERENCE_CHOICES = [INFERENCE_AUTO, INFERENCE_CUDA, INFERENCE_CPU]
 
 
-def get_execution_providers(use_gpu: bool) -> list[str]:
-    if not use_gpu:
-        return ["CPUExecutionProvider"]
-
+def resolve_execution_mode(inference_mode: str) -> tuple[str, str, list[str], int]:
+    inference_mode = inference_mode or INFERENCE_AUTO
     available = ort.get_available_providers()
-    if "CUDAExecutionProvider" not in available:
-        raise RuntimeError(
-            "CUDAExecutionProvider is not available. "
-            f"Available providers: {available}"
-        )
 
-    return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    if inference_mode == INFERENCE_CPU:
+        return "cpu", INFERENCE_CPU, ["CPUExecutionProvider"], -1
 
+    if inference_mode == INFERENCE_CUDA:
+        if "CUDAExecutionProvider" not in available:
+            raise RuntimeError(
+                "CUDA GPU was selected, but CUDAExecutionProvider is not available. "
+                f"Available providers: {available}"
+            )
+        return "cuda", INFERENCE_CUDA, ["CUDAExecutionProvider", "CPUExecutionProvider"], 0
 
-providers = get_execution_providers(USE_GPU)
-ctx_id = 0 if USE_GPU else -1
+    if inference_mode == INFERENCE_AUTO:
+        if "CUDAExecutionProvider" in available:
+            return "cuda", INFERENCE_CUDA, ["CUDAExecutionProvider", "CPUExecutionProvider"], 0
+        return "cpu", INFERENCE_CPU, ["CPUExecutionProvider"], -1
+
+    raise RuntimeError(
+        f"Unknown inference mode: {inference_mode}. "
+        f"Choose one of: {', '.join(INFERENCE_CHOICES)}"
+    )
+
 
 print("ONNX Runtime providers:", ort.get_available_providers(), flush=True)
-print("Using providers:", providers, flush=True)
 
 import cv2
 import numpy as np
@@ -49,15 +60,13 @@ import gradio as gr
 from tqdm import tqdm
 from insightface.app import FaceAnalysis
 from sklearn.cluster import DBSCAN, KMeans
-from PIL import Image
 
 
-# ── Model init ────────────────────────────────────────────────────────────────
-app = FaceAnalysis(name="buffalo_l", providers=providers)
-app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+FACE_APPS = {}
 
-if USE_GPU:
-    for model_name, model in app.models.items():
+
+def verify_cuda_sessions(face_app: FaceAnalysis) -> None:
+    for model_name, model in face_app.models.items():
         session = getattr(model, "session", None)
         if session is None:
             continue
@@ -68,6 +77,31 @@ if USE_GPU:
                 f"{model_name} is not using CUDA. "
                 f"Active providers: {model_providers}"
             )
+
+
+def get_face_app(inference_mode: str) -> tuple[FaceAnalysis, str]:
+    mode_key, mode_label, providers, ctx_id = resolve_execution_mode(inference_mode)
+    if mode_key in FACE_APPS:
+        return FACE_APPS[mode_key], mode_label
+
+    print(f"Initializing InsightFace with providers: {providers}", flush=True)
+    face_app = FaceAnalysis(name="buffalo_l", providers=providers)
+    face_app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+
+    if mode_key == "cuda":
+        verify_cuda_sessions(face_app)
+
+    FACE_APPS[mode_key] = face_app
+    return face_app, mode_label
+
+
+def provider_error(message: str) -> str:
+    return (
+        f"Could not start inference.\n"
+        f"{message}\n\n"
+        f"Available providers: {ort.get_available_providers()}"
+    )
+
 
 # ── Core pipeline ─────────────────────────────────────────────────────────────
 def image_paths_from_dir(photos_dir: Path) -> list[Path]:
@@ -101,7 +135,7 @@ def selected_image_paths(folder_files=None, dropped_files=None) -> list[Path]:
     return image_paths_from_dir(PHOTOS_DIR)
 
 
-def extract_embeddings(image_paths: list[Path]):
+def extract_embeddings(image_paths: list[Path], face_app: FaceAnalysis):
     embeddings, meta = [], []
 
     print(f"Found {len(image_paths)} images")
@@ -110,7 +144,7 @@ def extract_embeddings(image_paths: list[Path]):
         img = cv2.imread(str(img_path))
         if img is None:
             continue
-        faces = app.get(img)
+        faces = face_app.get(img)
         for face in faces:
             embeddings.append(face.normed_embedding)   # 512-dim, L2 normalised
             meta.append(img_path)
@@ -142,9 +176,13 @@ def organise_output(meta, labels, output_dir: Path):
             shutil.copy(img_path, dest_file)
 
 
-def run_pipeline(folder_files=None, dropped_files=None):
+def run_pipeline(folder_files=None, dropped_files=None, inference_mode=INFERENCE_AUTO):
     image_paths = selected_image_paths(folder_files, dropped_files)
-    embeddings, meta = extract_embeddings(image_paths)
+    if not image_paths:
+        return "No images found. Select a folder, drag in images, or add images to photos/."
+
+    face_app, resolved_mode = get_face_app(inference_mode)
+    embeddings, meta = extract_embeddings(image_paths, face_app)
     if len(embeddings) == 0:
         return "No faces found in the selected images."
 
@@ -155,6 +193,7 @@ def run_pipeline(folder_files=None, dropped_files=None):
     n_unknown = (labels == -1).sum()
     return (
         f"Done.\n"
+        f"  Inference: {resolved_mode}\n"
         f"  {len(meta)} faces detected across {len(set(meta))} photos\n"
         f"  {n_people} people identified\n"
         f"  {n_unknown} face(s) marked unknown (too few matches)\n"
@@ -179,20 +218,28 @@ def gradio_app():
             type="filepath",
             label="Drag and drop images",
         )
+        inference_radio = gr.Radio(
+            choices=INFERENCE_CHOICES,
+            value=INFERENCE_AUTO,
+            label="Inference",
+        )
 
         eps_slider = gr.Slider(0.3, 0.9, value=DBSCAN_EPS, step=0.05,
                                label="DBSCAN eps  (lower = stricter matching)")
         run_btn    = gr.Button("Run clustering", variant="primary")
         output_box = gr.Textbox(label="Result", lines=6)
 
-        def run_with_inputs(folder_files, dropped_files, eps):
+        def run_with_inputs(folder_files, dropped_files, inference_mode, eps):
             global DBSCAN_EPS
             DBSCAN_EPS = eps
-            return run_pipeline(folder_files, dropped_files)
+            try:
+                return run_pipeline(folder_files, dropped_files, inference_mode)
+            except RuntimeError as exc:
+                return provider_error(str(exc))
 
         run_btn.click(
             run_with_inputs,
-            inputs=[folder_upload, dropped_upload, eps_slider],
+            inputs=[folder_upload, dropped_upload, inference_radio, eps_slider],
             outputs=output_box,
         )
 
