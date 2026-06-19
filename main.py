@@ -165,7 +165,7 @@ def run_pipeline(folder_files=None, dropped_files=None):
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 def gradio_app():
     with gr.Blocks(title="Face Cluster") as demo:
-        gr.Markdown("## 📸 Face Clustering\nGroups selected photos by person.")
+        gr.Markdown("## Face Clustering Algorithm\nGroups selected photos by person. DBSCAN algorithm")
 
         folder_upload = gr.File(
             file_count="directory",
