@@ -124,6 +124,19 @@ def image_paths_from_dir(photos_dir: Path) -> list[Path]:
     )
 
 
+def as_path(file) -> Path:
+    if isinstance(file, (str, Path)):
+        return Path(file)
+
+    if isinstance(file, dict):
+        for key in ("path", "name"):
+            value = file.get(key)
+            if value:
+                return Path(value)
+
+    return Path(getattr(file, "path", getattr(file, "name", file)))
+
+
 def uploaded_paths(files) -> list[Path]:
     if files is None:
         return []
@@ -133,7 +146,7 @@ def uploaded_paths(files) -> list[Path]:
 
     paths = []
     for file in files:
-        path = Path(getattr(file, "name", file))
+        path = as_path(file)
         if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
             paths.append(path)
 
@@ -152,7 +165,7 @@ def process_heic_image(file_obj):
     if file_obj is None:
         return None
 
-    path = Path(getattr(file_obj, "name", file_obj))
+    path = as_path(file_obj)
     with Image.open(path) as image:
         rgb_image = image.convert("RGB")
         return cv2.cvtColor(np.array(rgb_image), cv2.COLOR_RGB2BGR)
