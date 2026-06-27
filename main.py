@@ -18,7 +18,18 @@ OUTPUT_DIR = Path("output")
 CLUSTER_MODE = "dbscan"   # "dbscan" | "kmeans"
 DBSCAN_EPS   = 0.6
 KMEANS_K     = 5          # only used if CLUSTER_MODE = "kmeans"
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+HEIC_SUFFIXES = {".heic", ".heif"}
+IMAGE_SUFFIXES = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    *HEIC_SUFFIXES,
+}
+GRADIO_IMAGE_FILE_TYPES = ["image", *sorted(HEIC_SUFFIXES)]
 INFERENCE_AUTO = "Auto"
 INFERENCE_CUDA = "CUDA GPU"
 INFERENCE_CPU = "CPU"
@@ -57,12 +68,15 @@ import cv2
 import numpy as np
 import shutil
 import gradio as gr
+from PIL import Image
+import pillow_heif
 from tqdm import tqdm
 from insightface.app import FaceAnalysis
 from sklearn.cluster import DBSCAN, KMeans
 
 
 FACE_APPS = {}
+pillow_heif.register_heif_opener()
 
 
 def verify_cuda_sessions(face_app: FaceAnalysis) -> None:
@@ -102,7 +116,6 @@ def provider_error(message: str) -> str:
         f"Available providers: {ort.get_available_providers()}"
     )
 
-
 # ── Core pipeline ─────────────────────────────────────────────────────────────
 def image_paths_from_dir(photos_dir: Path) -> list[Path]:
     return sorted(
@@ -135,13 +148,30 @@ def selected_image_paths(folder_files=None, dropped_files=None) -> list[Path]:
     return image_paths_from_dir(PHOTOS_DIR)
 
 
+def process_heic_image(file_obj):
+    if file_obj is None:
+        return None
+
+    path = Path(getattr(file_obj, "name", file_obj))
+    with Image.open(path) as image:
+        rgb_image = image.convert("RGB")
+        return cv2.cvtColor(np.array(rgb_image), cv2.COLOR_RGB2BGR)
+
+
+def read_image_for_detection(img_path: Path):
+    if img_path.suffix.lower() in HEIC_SUFFIXES:
+        return process_heic_image(img_path)
+
+    return cv2.imread(str(img_path))
+
+
 def extract_embeddings(image_paths: list[Path], face_app: FaceAnalysis):
     embeddings, meta = [], []
 
     print(f"Found {len(image_paths)} images")
 
     for img_path in tqdm(image_paths, desc="Extracting faces"):
-        img = cv2.imread(str(img_path))
+        img = read_image_for_detection(img_path)
         if img is None:
             continue
         faces = face_app.get(img)
@@ -200,7 +230,6 @@ def run_pipeline(folder_files=None, dropped_files=None, inference_mode=INFERENCE
         f"  Results saved to → {OUTPUT_DIR.resolve()}"
     )
 
-
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 def gradio_app():
     with gr.Blocks(title="Face Cluster") as demo:
@@ -208,13 +237,13 @@ def gradio_app():
 
         folder_upload = gr.File(
             file_count="directory",
-            file_types=["image"],
+            file_types=GRADIO_IMAGE_FILE_TYPES,
             type="filepath",
             label="Select a folder",
         )
         dropped_upload = gr.File(
             file_count="multiple",
-            file_types=["image"],
+            file_types=GRADIO_IMAGE_FILE_TYPES,
             type="filepath",
             label="Drag and drop images",
         )

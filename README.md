@@ -102,7 +102,7 @@ If neither input is provided, the app falls back to reading images from a local 
 Supported image extensions:
 
 ```text
-.jpg, .jpeg, .png, .webp, .bmp, .tif, .tiff
+.jpg, .jpeg, .png, .webp, .bmp, .tif, .tiff, .heic, .heif
 ```
 
 The DBSCAN `eps` slider controls clustering strictness:
